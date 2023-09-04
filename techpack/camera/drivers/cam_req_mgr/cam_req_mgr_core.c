@@ -1492,12 +1492,6 @@ static int __cam_req_mgr_process_req(struct cam_req_mgr_core_link *link,
 				rc = -EPERM;
 			}
 			spin_unlock_bh(&link->link_state_spin_lock);
-			/*
-			 * Update wd timer so in next frame if the request
-			 * packet is available request can be applied, SOF
-			 * freeze will hit otherwise.
-			 */
-			__cam_req_mgr_validate_crm_wd_timer(link);
 			goto error;
 		}
 	}
@@ -1887,13 +1881,10 @@ static int __cam_req_mgr_create_subdevs(
  *
  */
 static void __cam_req_mgr_destroy_subdev(
-	struct cam_req_mgr_connected_device **l_device)
+	struct cam_req_mgr_connected_device *l_device)
 {
-	CAM_DBG(CAM_CRM, "*l_device %pK", *l_device);
-	if (*(l_device) != NULL) {
-		kfree(*(l_device));
-		*l_device = NULL;
-	}
+	kfree(l_device);
+	l_device = NULL;
 }
 
 /**
@@ -3338,7 +3329,7 @@ static int __cam_req_mgr_unlink(struct cam_req_mgr_core_link *link)
 	__cam_req_mgr_destroy_link_info(link);
 	/* Free memory holding data of linked devs */
 
-	__cam_req_mgr_destroy_subdev(&link->l_dev);
+	__cam_req_mgr_destroy_subdev(link->l_dev);
 
 	/* Destroy the link handle */
 	rc = cam_destroy_link_hdl(link->link_hdl);
@@ -3499,7 +3490,7 @@ int cam_req_mgr_link(struct cam_req_mgr_ver_info *link_info)
 		link_info->u.link_info_v1.session_hdl, link->link_hdl);
 	wq_flag = CAM_WORKQ_FLAG_HIGH_PRIORITY | CAM_WORKQ_FLAG_SERIAL;
 	rc = cam_req_mgr_workq_create(buf, CRM_WORKQ_NUM_TASKS,
-		&link->workq, CRM_WORKQ_USAGE_NON_IRQ, wq_flag, false,
+		&link->workq, CRM_WORKQ_USAGE_NON_IRQ, wq_flag,
 		cam_req_mgr_process_workq_link_worker);
 	if (rc < 0) {
 		CAM_ERR(CAM_CRM, "FATAL: unable to create worker");
@@ -3519,7 +3510,7 @@ int cam_req_mgr_link(struct cam_req_mgr_ver_info *link_info)
 	mutex_unlock(&g_crm_core_dev->crm_lock);
 	return rc;
 setup_failed:
-	__cam_req_mgr_destroy_subdev(&link->l_dev);
+	__cam_req_mgr_destroy_subdev(link->l_dev);
 create_subdev_failed:
 	cam_destroy_link_hdl(link->link_hdl);
 	link_info->u.link_info_v1.link_hdl = -1;
@@ -3615,7 +3606,7 @@ int cam_req_mgr_link_v2(struct cam_req_mgr_ver_info *link_info)
 		link_info->u.link_info_v2.session_hdl, link->link_hdl);
 	wq_flag = CAM_WORKQ_FLAG_HIGH_PRIORITY | CAM_WORKQ_FLAG_SERIAL;
 	rc = cam_req_mgr_workq_create(buf, CRM_WORKQ_NUM_TASKS,
-		&link->workq, CRM_WORKQ_USAGE_NON_IRQ, wq_flag, false,
+		&link->workq, CRM_WORKQ_USAGE_NON_IRQ, wq_flag,
 		cam_req_mgr_process_workq_link_worker);
 	if (rc < 0) {
 		CAM_ERR(CAM_CRM, "FATAL: unable to create worker");
@@ -3635,7 +3626,7 @@ int cam_req_mgr_link_v2(struct cam_req_mgr_ver_info *link_info)
 	mutex_unlock(&g_crm_core_dev->crm_lock);
 	return rc;
 setup_failed:
-	__cam_req_mgr_destroy_subdev(&link->l_dev);
+	__cam_req_mgr_destroy_subdev(link->l_dev);
 create_subdev_failed:
 	cam_destroy_link_hdl(link->link_hdl);
 	link_info->u.link_info_v2.link_hdl = -1;

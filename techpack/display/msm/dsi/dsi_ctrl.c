@@ -302,7 +302,6 @@ static void dsi_ctrl_flush_cmd_dma_queue(struct dsi_ctrl *dsi_ctrl)
 		cancel_work_sync(&dsi_ctrl->dma_cmd_wait);
 	} else {
 		flush_workqueue(dsi_ctrl->dma_cmd_workq);
-		SDE_EVT32(SDE_EVTLOG_FUNC_CASE2);
 	}
 }
 
@@ -355,7 +354,7 @@ static int dsi_ctrl_check_state(struct dsi_ctrl *dsi_ctrl,
 	int rc = 0;
 	struct dsi_ctrl_state_info *state = &dsi_ctrl->current_state;
 
-	SDE_EVT32(dsi_ctrl->cell_index, op, op_state);
+	SDE_EVT32(dsi_ctrl->cell_index, op);
 
 	switch (op) {
 	case DSI_CTRL_OP_POWER_STATE_CHANGE:
@@ -979,7 +978,6 @@ static int dsi_ctrl_update_link_freqs(struct dsi_ctrl *dsi_ctrl,
 	DSI_CTRL_DEBUG(dsi_ctrl, "byte_clk_rate = %llu, byte_intf_clk = %llu\n",
 		  byte_clk_rate, byte_intf_clk_rate);
 	DSI_CTRL_DEBUG(dsi_ctrl, "pclk_rate = %llu\n", pclk_rate);
-	SDE_EVT32(dsi_ctrl->cell_index, bit_rate, byte_clk_rate, pclk_rate);
 
 	dsi_ctrl->clk_freq.byte_clk_rate = byte_clk_rate;
 	dsi_ctrl->clk_freq.byte_intf_clk_rate = byte_intf_clk_rate;
@@ -1053,31 +1051,21 @@ error:
 	return rc;
 }
 
-static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
-				     const struct mipi_dsi_packet *packet,
-				     u8 **buffer,
-				     u32 *size)
+static int dsi_ctrl_copy_and_pad_cmd(const struct mipi_dsi_packet *packet,
+				     u8 *buf, size_t len)
 {
 	int rc = 0;
-	u8 *buf = NULL;
-	u32 len, i;
 	u8 cmd_type = 0;
 
-	len = packet->size;
-	len += 0x3; len &= ~0x03; /* Align to 32 bits */
+	if (unlikely(len < packet->size))
+		return -EINVAL;
 
-	buf = devm_kzalloc(&dsi_ctrl->pdev->dev, len * sizeof(u8), GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	for (i = 0; i < len; i++) {
-		if (i >= packet->size)
-			buf[i] = 0xFF;
-		else if (i < sizeof(packet->header))
-			buf[i] = packet->header[i];
-		else
-			buf[i] = packet->payload[i - sizeof(packet->header)];
-	}
+	memcpy(buf, packet->header, sizeof(packet->header));
+	if (packet->payload_length)
+		memcpy(buf + sizeof(packet->header), packet->payload,
+		       packet->payload_length);
+	if (packet->size < len)
+		memset(buf + packet->size, 0xFF, len - packet->size);
 
 	if (packet->payload_length > 0)
 		buf[3] |= BIT(6);
@@ -1090,9 +1078,6 @@ static int dsi_ctrl_copy_and_pad_cmd(struct dsi_ctrl *dsi_ctrl,
 			(cmd_type == MIPI_DSI_GENERIC_READ_REQUEST_1_PARAM) ||
 			(cmd_type == MIPI_DSI_GENERIC_READ_REQUEST_2_PARAM))
 		buf[3] |= BIT(5);
-
-	*buffer = buf;
-	*size = len;
 
 	return rc;
 }
@@ -1167,7 +1152,6 @@ void dsi_message_setup_tx_mode(struct dsi_ctrl *dsi_ctrl,
 	 * override cmd fetch mode during secure session
 	 */
 	if (dsi_ctrl->secure_mode) {
-		SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_CASE1);
 		*flags &= ~DSI_CTRL_CMD_FETCH_MEMORY;
 		*flags |= DSI_CTRL_CMD_FIFO_STORE;
 		DSI_CTRL_DEBUG(dsi_ctrl,
@@ -1255,8 +1239,7 @@ static void dsi_kickoff_msg_tx(struct dsi_ctrl *dsi_ctrl,
 	u32 line_no = 0x1;
 	struct dsi_ctrl_hw_ops dsi_hw_ops = dsi_ctrl->hw.ops;
 
-	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, flags,
-		msg->flags);
+	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, flags);
 
 	line_no = calculate_schedule_line(dsi_ctrl, flags);
 
@@ -1378,9 +1361,8 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 	struct mipi_dsi_packet packet;
 	struct dsi_ctrl_cmd_dma_fifo_info cmd;
 	struct dsi_ctrl_cmd_dma_info cmd_mem;
-	u32 length = 0;
+	u32 length;
 	u8 *buffer = NULL;
-	u32 cnt = 0;
 	u8 *cmdbuf;
 
 	/* Select the tx mode to transfer the command */
@@ -1427,19 +1409,22 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 		goto error;
 	}
 
-	rc = dsi_ctrl_copy_and_pad_cmd(dsi_ctrl,
-			&packet,
-			&buffer,
-			&length);
-	if (rc) {
-		DSI_CTRL_ERR(dsi_ctrl, "failed to copy message, rc=%d\n", rc);
-		goto error;
-	}
+	length = ALIGN(packet.size, 4);
 
 	if ((msg->flags & MIPI_DSI_MSG_LASTCOMMAND))
-		buffer[3] |= BIT(7);//set the last cmd bit in header.
+                packet.header[3] |= BIT(7);//set the last cmd bit in header.
 
 	if (*flags & DSI_CTRL_CMD_FETCH_MEMORY) {
+		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
+		cmdbuf = dsi_ctrl->vaddr + dsi_ctrl->cmd_len;
+
+		rc = dsi_ctrl_copy_and_pad_cmd(&packet, cmdbuf, length);
+		if (rc) {
+			DSI_CTRL_ERR(dsi_ctrl, "failed to copy message, rc=%d\n",
+					rc);
+			goto error;
+		}
+
 		/* Embedded mode config is selected */
 		cmd_mem.offset = dsi_ctrl->cmd_buffer_iova;
 		cmd_mem.en_broadcast = (*flags & DSI_CTRL_CMD_BROADCAST) ?
@@ -1448,12 +1433,6 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 			true : false;
 		cmd_mem.use_lpm = (msg->flags & MIPI_DSI_MSG_USE_LPM) ?
 			true : false;
-
-		cmdbuf = (u8 *)(dsi_ctrl->vaddr);
-
-		msm_gem_sync(dsi_ctrl->tx_cmd_buf);
-		for (cnt = 0; cnt < length; cnt++)
-			cmdbuf[dsi_ctrl->cmd_len + cnt] = buffer[cnt];
 
 		dsi_ctrl->cmd_len += length;
 
@@ -1465,6 +1444,20 @@ static int dsi_message_tx(struct dsi_ctrl *dsi_ctrl,
 		}
 
 	} else if (*flags & DSI_CTRL_CMD_FIFO_STORE) {
+		buffer = devm_kzalloc(&dsi_ctrl->pdev->dev, length,
+					   GFP_KERNEL);
+		if (!buffer) {
+			rc = -ENOMEM;
+			goto error;
+		}
+
+		rc = dsi_ctrl_copy_and_pad_cmd(&packet, buffer, length);
+		if (rc) {
+			DSI_CTRL_ERR(dsi_ctrl, "failed to copy message, rc=%d\n",
+					rc);
+			goto error;
+		}
+
 		cmd.command =  (u32 *)buffer;
 		cmd.size = length;
 		cmd.en_broadcast = (*flags & DSI_CTRL_CMD_BROADCAST) ?
@@ -2511,8 +2504,9 @@ static bool dsi_ctrl_check_for_spurious_error_interrupts(
 
 	if ((jiffies_now - dsi_ctrl->jiffies_start) < intr_check_interval) {
 		if (dsi_ctrl->error_interrupt_count > interrupt_threshold) {
-			DSI_CTRL_WARN(dsi_ctrl, "Detected spurious interrupts on dsi ctrl\n");
-			SDE_EVT32_IRQ(dsi_ctrl->error_interrupt_count);
+			SDE_EVT32_IRQ(dsi_ctrl->cell_index,
+				      dsi_ctrl->error_interrupt_count,
+				      interrupt_threshold);
 			return true;
 		}
 	} else {
@@ -2560,7 +2554,6 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 							0, 0, 0, 0);
 			}
 		}
-		DSI_CTRL_ERR(dsi_ctrl, "tx timeout error: 0x%lx\n", error);
 	}
 
 	/* DSI FIFO OVERFLOW error */
@@ -2576,8 +2569,6 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 						cb_info.event_idx,
 						dsi_ctrl->cell_index,
 						0, 0, 0, 0);
-			DSI_CTRL_ERR(dsi_ctrl, "dsi FIFO OVERFLOW error: 0x%lx\n",
-					error);
 		}
 	}
 
@@ -2590,8 +2581,6 @@ static void dsi_ctrl_handle_error_status(struct dsi_ctrl *dsi_ctrl,
 						dsi_ctrl->cell_index,
 						0, 0, 0, 0);
 		}
-		DSI_CTRL_ERR(dsi_ctrl, "dsi FIFO UNDERFLOW error: 0x%lx\n",
-				error);
 	}
 
 	/* DSI PLL UNLOCK error */
@@ -2772,7 +2761,7 @@ void dsi_ctrl_enable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 			intr_idx >= DSI_STATUS_INTERRUPT_COUNT)
 		return;
 
-	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, intr_idx);
+	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY);
 	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx] == 0) {
@@ -2805,7 +2794,7 @@ void dsi_ctrl_disable_status_interrupt(struct dsi_ctrl *dsi_ctrl,
 	if (!dsi_ctrl || intr_idx >= DSI_STATUS_INTERRUPT_COUNT)
 		return;
 
-	SDE_EVT32_IRQ(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY, intr_idx);
+	SDE_EVT32(dsi_ctrl->cell_index, SDE_EVTLOG_FUNC_ENTRY);
 	spin_lock_irqsave(&dsi_ctrl->irq_info.irq_lock, flags);
 
 	if (dsi_ctrl->irq_info.irq_stat_refcount[intr_idx])
@@ -3627,7 +3616,6 @@ int dsi_ctrl_set_host_engine_state(struct dsi_ctrl *dsi_ctrl,
 	else
 		dsi_ctrl->hw.ops.ctrl_en(&dsi_ctrl->hw, false);
 
-	SDE_EVT32(dsi_ctrl->cell_index, state);
 	DSI_CTRL_DEBUG(dsi_ctrl, "Set host engine state = %d\n", state);
 	dsi_ctrl_update_state(dsi_ctrl, DSI_CTRL_OP_HOST_ENGINE, state);
 error:
@@ -3667,7 +3655,6 @@ int dsi_ctrl_set_cmd_engine_state(struct dsi_ctrl *dsi_ctrl,
 	else
 		dsi_ctrl->hw.ops.cmd_engine_en(&dsi_ctrl->hw, false);
 
-	SDE_EVT32(dsi_ctrl->cell_index, state);
 	DSI_CTRL_DEBUG(dsi_ctrl, "Set cmd engine state = %d\n", state);
 	dsi_ctrl_update_state(dsi_ctrl, DSI_CTRL_OP_CMD_ENGINE, state);
 error:
@@ -3711,7 +3698,6 @@ int dsi_ctrl_set_vid_engine_state(struct dsi_ctrl *dsi_ctrl,
 	if (!on && dsi_ctrl->version < DSI_CTRL_VERSION_1_3)
 		dsi_ctrl->hw.ops.soft_reset(&dsi_ctrl->hw);
 
-	SDE_EVT32(dsi_ctrl->cell_index, state);
 	DSI_CTRL_DEBUG(dsi_ctrl, "Set video engine state = %d\n", state);
 	dsi_ctrl_update_state(dsi_ctrl, DSI_CTRL_OP_VID_ENGINE, state);
 error:

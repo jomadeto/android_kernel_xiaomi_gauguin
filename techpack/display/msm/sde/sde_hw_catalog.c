@@ -3699,7 +3699,7 @@ static int _sde_qos_parse_dt_cfg(struct sde_mdss_cfg *cfg, int *prop_count,
 			cfg->perf.danger_lut[i] =
 				PROP_VALUE_ACCESS(prop_value,
 						QOS_DANGER_LUT, i);
-			SDE_DEBUG("danger usage:%i lut:0x%x\n",
+			SDE_DEBUG("danger usage:%i lut:0x%llx\n",
 					i, cfg->perf.danger_lut[i]);
 		}
 	}
@@ -3748,7 +3748,7 @@ static int _sde_qos_parse_dt_cfg(struct sde_mdss_cfg *cfg, int *prop_count,
 			cfg->perf.safe_lut[index] =
 				PROP_VALUE_ACCESS(prop_value, safe_key,
 					(j * 2) + 1);
-			SDE_DEBUG("usage:%d creq lut:0x%llx safe:0x%x\n",
+			SDE_DEBUG("usage:%d creq lut:0x%llx safe:0x%llx\n",
 				index, cfg->perf.creq_lut[index],
 				cfg->perf.safe_lut[index]);
 		}
@@ -4352,7 +4352,7 @@ static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 		sde_cfg->has_cwb_support = true;
 		sde_cfg->has_wb_ubwc = true;
 		sde_cfg->has_qsync = true;
-		sde_cfg->perf.min_prefill_lines = 35;
+		sde_cfg->perf.min_prefill_lines = 24;
 		sde_cfg->vbif_qos_nlvl = 8;
 		sde_cfg->ts_prefill_rev = 2;
 		sde_cfg->ctl_rev = SDE_CTL_CFG_VERSION_1_0_0;
@@ -4402,7 +4402,7 @@ static int _sde_hardware_pre_caps(struct sde_mdss_cfg *sde_cfg, uint32_t hw_rev)
 	} else if (IS_LAGOON_TARGET(hw_rev)) {
 		sde_cfg->has_cwb_support = true;
 		sde_cfg->has_qsync = true;
-		sde_cfg->perf.min_prefill_lines = 35;
+		sde_cfg->perf.min_prefill_lines = 24;
 		sde_cfg->vbif_qos_nlvl = 8;
 		sde_cfg->ts_prefill_rev = 2;
 		sde_cfg->ctl_rev = SDE_CTL_CFG_VERSION_1_0_0;

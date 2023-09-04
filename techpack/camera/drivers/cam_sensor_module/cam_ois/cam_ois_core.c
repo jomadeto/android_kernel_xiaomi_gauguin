@@ -86,10 +86,6 @@ static int cam_ois_get_dev_handle(struct cam_ois_ctrl_t *o_ctrl,
 
 	ois_acq_dev.device_handle =
 		cam_create_device_hdl(&bridge_params);
-	if (ois_acq_dev.device_handle <= 0) {
-		CAM_ERR(CAM_OIS, "Can not create device handle");
-		return -EFAULT;
-	}
 	o_ctrl->bridge_intf.device_hdl = ois_acq_dev.device_handle;
 	o_ctrl->bridge_intf.session_hdl = ois_acq_dev.session_handle;
 
@@ -224,7 +220,7 @@ static int cam_ois_apply_settings(struct cam_ois_ctrl_t *o_ctrl,
 		&(i2c_set->list_head), list) {
 		if (i2c_list->op_code ==  CAM_SENSOR_I2C_WRITE_RANDOM) {
 			rc = camera_io_dev_write(&(o_ctrl->io_master_info),
-				&(i2c_list->i2c_settings), false);
+				&(i2c_list->i2c_settings));
 			if (rc < 0) {
 				CAM_ERR(CAM_OIS,
 					"Failed in Applying i2c wrt settings");
@@ -355,7 +351,7 @@ static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 	}
 
 	rc = camera_io_dev_write_continuous(&(o_ctrl->io_master_info),
-		&i2c_reg_setting, 1, false);
+		&i2c_reg_setting, 1);
 	if (rc < 0) {
 		CAM_ERR(CAM_OIS, "OIS FW download failed %d", rc);
 		goto release_firmware;
@@ -400,7 +396,7 @@ static int cam_ois_fw_download(struct cam_ois_ctrl_t *o_ctrl)
 	}
 
 	rc = camera_io_dev_write_continuous(&(o_ctrl->io_master_info),
-		&i2c_reg_setting, 1, false);
+		&i2c_reg_setting, 1);
 	if (rc < 0)
 		CAM_ERR(CAM_OIS, "OIS FW download failed %d", rc);
 

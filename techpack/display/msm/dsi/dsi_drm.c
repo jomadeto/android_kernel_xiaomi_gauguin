@@ -6,12 +6,12 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic.h>
+#include <drm/drm_notifier_mi.h>
 
 #include "msm_kms.h"
 #include "sde_connector.h"
 #include "dsi_drm.h"
 #include "sde_trace.h"
-#include "sde_dbg.h"
 
 #define to_dsi_bridge(x)     container_of((x), struct dsi_bridge, base)
 #define to_dsi_state(x)      container_of((x), struct dsi_connector_state, base)
@@ -165,6 +165,8 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 {
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
+	struct mi_drm_notifier mi_notify;
+	int power_mode = 0;
 
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
@@ -178,6 +180,11 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 
 	if (bridge->encoder->crtc->state->active_changed)
 		atomic_set(&c_bridge->display->panel->esd_recovery_pending, 0);
+
+	power_mode = MI_DRM_BLANK_UNBLANK;
+	mi_notify.data = &power_mode;
+	mi_notify.id = MSM_DRM_PRIMARY_DISPLAY;
+	mi_drm_notifier_call_chain(MI_DRM_EARLY_EVENT_BLANK, &mi_notify);
 
 	/* By this point mode should have been validated through mode_fixup */
 	rc = dsi_display_set_mode(c_bridge->display,
@@ -212,6 +219,9 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 				c_bridge->id, rc);
 		(void)dsi_display_unprepare(c_bridge->display);
 	}
+
+	mi_drm_notifier_call_chain(MI_DRM_EVENT_BLANK, &mi_notify);
+
 	SDE_ATRACE_END("dsi_display_enable");
 
 	rc = dsi_display_splash_res_cleanup(c_bridge->display);
@@ -285,11 +295,18 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 {
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
+	struct mi_drm_notifier mi_notify;
+	int power_mode = 0;
 
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
 		return;
 	}
+
+	power_mode = MI_DRM_BLANK_POWERDOWN;
+	mi_notify.data = &power_mode;
+	mi_notify.id = MSM_DRM_PRIMARY_DISPLAY;
+	mi_drm_notifier_call_chain(MI_DRM_EARLY_EVENT_BLANK, &mi_notify);
 
 	SDE_ATRACE_BEGIN("dsi_bridge_post_disable");
 	SDE_ATRACE_BEGIN("dsi_display_disable");
@@ -309,6 +326,9 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 		SDE_ATRACE_END("dsi_bridge_post_disable");
 		return;
 	}
+
+	mi_drm_notifier_call_chain(MI_DRM_EVENT_BLANK, &mi_notify);
+
 	SDE_ATRACE_END("dsi_bridge_post_disable");
 }
 
@@ -410,32 +430,16 @@ static bool dsi_bridge_mode_fixup(struct drm_bridge *bridge,
 		if ((dsi_mode.panel_mode != cur_dsi_mode.panel_mode) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) &&
 			(crtc_state->enable ==
-				crtc_state->crtc->state->enable)) {
+				crtc_state->crtc->state->enable))
 			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_POMS;
-
-			SDE_EVT32(SDE_EVTLOG_FUNC_CASE1,
-				dsi_mode.timing.h_active,
-				dsi_mode.timing.v_active,
-				dsi_mode.timing.refresh_rate,
-				dsi_mode.pixel_clk_khz,
-				dsi_mode.panel_mode);
-		}
 		/* No DMS/VRR when drm pipeline is changing */
 		if (!drm_mode_equal(cur_mode, adjusted_mode) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_VRR)) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_POMS)) &&
 			(!(dsi_mode.dsi_mode_flags & DSI_MODE_FLAG_DYN_CLK)) &&
 			(!crtc_state->active_changed ||
-			 display->is_cont_splash_enabled)) {
+			 display->is_cont_splash_enabled))
 			dsi_mode.dsi_mode_flags |= DSI_MODE_FLAG_DMS;
-
-			SDE_EVT32(SDE_EVTLOG_FUNC_CASE2,
-				dsi_mode.timing.h_active,
-				dsi_mode.timing.v_active,
-				dsi_mode.timing.refresh_rate,
-				dsi_mode.pixel_clk_khz,
-				dsi_mode.panel_mode);
-		}
 	}
 
 	/* Reject seamless transition when active changed */

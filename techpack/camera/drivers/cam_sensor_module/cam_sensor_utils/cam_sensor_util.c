@@ -729,7 +729,7 @@ int cam_sensor_util_i2c_apply_setting(
 	switch (i2c_list->op_code) {
 	case CAM_SENSOR_I2C_WRITE_RANDOM: {
 		rc = camera_io_dev_write(io_master_info,
-			&(i2c_list->i2c_settings), false);
+			&(i2c_list->i2c_settings));
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to random write I2C settings: %d",
@@ -740,8 +740,7 @@ int cam_sensor_util_i2c_apply_setting(
 	}
 	case CAM_SENSOR_I2C_WRITE_SEQ: {
 		rc = camera_io_dev_write_continuous(
-			io_master_info, &(i2c_list->i2c_settings),
-			0, false);
+			io_master_info, &(i2c_list->i2c_settings), 0);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to seq write I2C settings: %d",
@@ -752,8 +751,7 @@ int cam_sensor_util_i2c_apply_setting(
 	}
 	case CAM_SENSOR_I2C_WRITE_BURST: {
 		rc = camera_io_dev_write_continuous(
-			io_master_info, &(i2c_list->i2c_settings),
-			1, false);
+			io_master_info, &(i2c_list->i2c_settings), 1);
 		if (rc < 0) {
 			CAM_ERR(CAM_SENSOR,
 				"Failed to burst write I2C settings: %d",
@@ -1059,6 +1057,31 @@ int32_t msm_camera_fill_vreg_params(
 			if (j == num_vreg)
 				power_setting[i].seq_val = INVALID_VREG;
 			break;
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 start*/
+		case SENSOR_VREG_LDO:
+                            for (j = 0; j < num_vreg; j++) {
+
+				if (!strcmp(soc_info->rgltr_name[j],
+					"vreg_ldo")) {
+					CAM_DBG(CAM_SENSOR,
+						"i:%d j:%d VREG_LDO", i, j);
+					power_setting[i].seq_val = j;
+
+					if (VALIDATE_VOLTAGE(
+						soc_info->rgltr_min_volt[j],
+						soc_info->rgltr_max_volt[j],
+						power_setting[i].config_val)) {
+						soc_info->rgltr_min_volt[j] =
+						soc_info->rgltr_max_volt[j] =
+						power_setting[i].config_val;
+					}
+					break;
+				}
+			}
+			if (j == num_vreg)
+				power_setting[i].seq_val = INVALID_VREG;
+			break;
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 end*/
 		default:
 			break;
 		}
@@ -1989,6 +2012,9 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 start*/
+		case SENSOR_VREG_LDO:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 end*/
 			if (power_setting->seq_val == INVALID_VREG)
 				break;
 
@@ -2105,6 +2131,9 @@ power_up_failed:
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 start*/
+		case SENSOR_VREG_LDO:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 end*/
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Disable Regulator");
 				vreg_idx = power_setting->seq_val;
@@ -2273,6 +2302,9 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 start*/
+		case SENSOR_VREG_LDO:
+/*cuixiaojie@xiaomi.com add ncp163 1.95v-2v 2020-09-07 end*/
 			if (pd->seq_val == INVALID_VREG)
 				break;
 

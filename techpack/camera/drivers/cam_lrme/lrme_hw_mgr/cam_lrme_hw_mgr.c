@@ -113,11 +113,6 @@ static int cam_lrme_mgr_util_packet_validate(struct cam_packet *packet,
 		return -EINVAL;
 	}
 
-	if (!packet->num_cmd_buf) {
-		CAM_ERR(CAM_LRME, "no cmd bufs");
-		return -EINVAL;
-	}
-
 	cmd_desc = (struct cam_cmd_buf_desc *)((uint8_t *)&packet->payload +
 		packet->cmd_buf_offset);
 
@@ -1080,7 +1075,7 @@ int cam_lrme_mgr_register_device(
 	CAM_DBG(CAM_LRME, "Create submit workq for %s", buf);
 	rc = cam_req_mgr_workq_create(buf,
 		CAM_LRME_WORKQ_NUM_TASK,
-		&hw_device->work, CRM_WORKQ_USAGE_NON_IRQ, 0, true,
+		&hw_device->work, CRM_WORKQ_USAGE_NON_IRQ, 0,
 		cam_req_mgr_process_workq_cam_lrme_device_submit_worker);
 	if (rc) {
 		CAM_ERR(CAM_LRME,
